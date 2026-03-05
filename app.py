@@ -12,14 +12,14 @@ from PyPDF2 import PdfReader
 import docx
 
 # --- 1. PAGE CONFIGURATION ---
-st.set_page_config(page_title="Albert", page_icon="🤖", layout="centered")
+st.set_page_config(page_title="Albert", page_icon="🤖", layout="wide")
 
 # --- 2. SECURE API LOADING ---
 try:
     API_KEY = st.secrets["GROQ_API_KEY"]
     client = groq.Groq(api_key=API_KEY)
 except Exception:
-    st.error("⚠️ Developer Setup Required: Add 'GROQ_API_KEY' to Streamlit Secrets.")
+    st.error("⚠️ Setup Error: Add your 'GROQ_API_KEY' to Streamlit Secrets.")
     st.stop()
 
 # --- 3. UTILITY FUNCTIONS ---
@@ -51,14 +51,14 @@ def get_web_context(query):
     except:
         return ""
 
-# --- 4. ALBERT UI ---
-st.title("🤖 I am Albert")
-st.caption("Vision • Research • Memory • Enhanced AI Art")
+# --- 4. UI SETUP ---
+st.title("🤖 Albert: Your 2026 AI Assistant")
+st.markdown("---")
 
 with st.sidebar:
-    st.header("📁 Upload Files")
-    uploaded_file = st.file_uploader("Upload Image, PDF, or Doc", type=["pdf", "docx", "jpg", "jpeg", "png"])
-    if st.button("Clear Chat"):
+    st.header("Settings & Files")
+    uploaded_file = st.file_uploader("Upload Image/PDF/Doc", type=["pdf", "docx", "jpg", "jpeg", "png"])
+    if st.button("🗑️ Clear History"):
         st.session_state.messages = []
         st.rerun()
 
@@ -70,87 +70,91 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # --- 5. CHAT LOGIC ---
-if prompt := st.chat_input("Ask Albert to draw, analyze, or research..."):
+if prompt := st.chat_input("Draw me a futuristic car... or ask a question"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # --- PATH A: IMAGE GENERATION (Wait-and-Verify Logic) ---
-        image_keywords = ["draw", "generate", "image", "paint", "create a picture", "make a photo"]
-        if any(word in prompt.lower() for word in image_keywords):
-            with st.spinner("🎨 Albert is painting (this takes about 5-10 seconds)..."):
-                # 1. AI Prompt Enhancement
-                enhance_instruction = f"Expand this into a detailed 4k AI art prompt: '{prompt}'. Respond ONLY with the prompt."
-                try:
-                    enhanced_resp = client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
-                        messages=[{"role": "user", "content": enhance_instruction}]
-                    )
-                    art_prompt = enhanced_resp.choices[0].message.content
-                except:
-                    art_prompt = prompt
+        # --- PATH A: IMAGE GENERATION (RELIABLE 2026 LOGIC) ---
+        img_triggers = ["draw", "generate", "image", "paint", "picture", "create"]
+        if any(word in prompt.lower() for word in img_triggers):
+            status_box = st.status("🎨 Albert is creating art...", expanded=True)
+            
+            # 1. Expand Prompt using Llama
+            enhance_cmd = f"Rewrite this as a high-detail 4k AI art prompt: '{prompt}'. Focus on lighting/style. No preamble, just the prompt."
+            try:
+                enh_resp = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "user", "content": enhance_cmd}])
+                art_prompt = enh_resp.choices[0].message.content
+            except:
+                art_prompt = prompt
 
-                # 2. Prepare URL
-                encoded_art = urllib.parse.quote(art_prompt.strip())
-                seed = random.randint(1, 1000000)
-                image_url = f"https://image.pollinations.ai/prompt/{encoded_art}?width=1024&height=1024&nologo=true&seed={seed}"
-                
-                # 3. Wait-and-Verify Fix
-                image_ready = False
-                for attempt in range(6): # Try for 12 seconds total
-                    check = requests.get(image_url)
-                    if check.status_code == 200 and len(check.content) > 5000: # Ensure it's not a tiny error icon
+            # 2. Build Unified URL
+            clean_art = urllib.parse.quote(art_prompt.strip())
+            seed = random.randint(1, 999999)
+            # gen.pollinations.ai is the stable 2026 endpoint
+            image_url = f"https://gen.pollinations.ai/prompt/{clean_art}?width=1024&height=1024&nologo=true&seed={seed}&cache={time.time()}"
+            
+            # 3. Validation Loop
+            image_ready = False
+            for i in range(10): # Try for 20 seconds
+                status_box.update(label=f"🖌️ Painting... (Attempt {i+1}/10)", state="running")
+                try:
+                    r = requests.get(image_url, timeout=10)
+                    if r.status_code == 200 and len(r.content) > 10000: # 10kb check ensures it's a real image
                         image_ready = True
                         break
-                    time.sleep(2)
+                except:
+                    pass
+                time.sleep(2)
 
-                if image_ready:
-                    st.image(image_url, caption="Albert's Masterpiece")
-                    st.markdown(f"[📥 Download this Image]({image_url})")
-                    full_response = f"I've finished the painting! Here is the prompt I used: *{art_prompt}*"
-                else:
-                    st.error("The artist is busy! Please try sending the prompt again.")
-                    full_response = "I had trouble rendering the image. Please try again!"
+            if image_ready:
+                status_box.update(label="✅ Masterpiece Complete!", state="complete")
+                st.image(image_url, caption=f"Albert's creation for: {prompt}")
+                st.markdown(f"**[💾 Download High-Res]({image_url})**")
+                full_response = f"I've generated that image! Prompt used: *{art_prompt}*"
+            else:
+                status_box.update(label="❌ Artist's Block (Server Timeout)", state="error")
+                st.error("The art server didn't respond in time. Please try a simpler prompt.")
+                full_response = "Sorry, I couldn't render that image right now."
 
-        # --- PATH B: TEXT & VISION ---
+        # --- PATH B: TEXT / VISION ---
         else:
-            file_context, is_image, base64_image = "", False, None
+            file_txt, is_img, b64_img = "", False, None
             if uploaded_file:
                 if uploaded_file.type.startswith("image"):
-                    is_image, base64_image = True, encode_image(uploaded_file)
+                    is_img, b64_img = True, encode_image(uploaded_file)
                 else:
-                    file_context = extract_text(uploaded_file)
+                    file_txt = extract_text(uploaded_file)
 
             with st.status("🔍 Researching...", expanded=False):
                 web_info = get_web_context(prompt)
             
-            messages_to_send = []
-            for m in st.session_state.messages[:-1]:
-                messages_to_send.append({"role": m["role"], "content": m["content"]})
+            history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
             
-            if is_image:
-                messages_to_send.append({
+            if is_img:
+                history.append({
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": f"Context: {web_info}\n\nQuestion: {prompt}"},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                        {"type": "text", "text": f"Web Info: {web_info}\n\nQuestion: {prompt}"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}
                     ]
                 })
+                model = "meta-llama/llama-4-scout-17b-16e-instruct"
             else:
-                messages_to_send.append({"role": "user", "content": f"File: {file_context}\nWeb: {web_info}\nQ: {prompt}"})
+                history.append({"role": "user", "content": f"File: {file_txt}\nWeb: {web_info}\nQ: {prompt}"})
+                model = "llama-3.3-70b-versatile"
 
-            response_placeholder = st.empty()
+            resp_placeholder = st.empty()
             full_response = ""
             try:
-                model = "meta-llama/llama-4-scout-17b-16e-instruct" if is_image else "llama-3.3-70b-versatile"
-                stream = client.chat.completions.create(model=model, messages=messages_to_send, stream=True)
+                stream = client.chat.completions.create(model=model, messages=history, stream=True)
                 for chunk in stream:
                     if chunk.choices[0].delta.content:
                         full_response += chunk.choices[0].delta.content
-                        response_placeholder.markdown(full_response + "▌")
-                response_placeholder.markdown(full_response)
+                        resp_placeholder.markdown(full_response + "▌")
+                resp_placeholder.markdown(full_response)
             except Exception as e:
-                st.error(f"Albert error: {str(e)}")
+                st.error(f"Error: {str(e)}")
 
     st.session_state.messages.append({"role": "assistant", "content": full_response})
