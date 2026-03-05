@@ -4,3 +4,4 @@ duckduckgo-search
 PyPDF2
 python-docx
 Pillow
+requests
