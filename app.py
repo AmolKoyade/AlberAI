@@ -10,7 +10,7 @@ st.set_page_config(page_title="Albert", page_icon="🤖", layout="wide")
 client = setup_client()
 
 # --- 3. UI SETUP ---
-st.title("🤖 I am Albert")
+st.title("🤖 I am Newton")
 st.caption("2026 Edition: Vision • Research • Unstoppable Art")
 
 with st.sidebar:
