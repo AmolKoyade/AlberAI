@@ -35,8 +35,6 @@ if "messages" not in st.session_state:
 # --- Render chat history ---
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        # FIX 1: Check isinstance before .startswith() to avoid AttributeError
-        # crash when content is a list (from a previous image-upload turn).
         if isinstance(msg["content"], str) and msg["content"].startswith("__IMAGE__"):
             image_url = msg["content"].replace("__IMAGE__", "")
             st.markdown(
@@ -46,30 +44,62 @@ for msg in st.session_state.messages:
         else:
             st.markdown(msg["content"])
 
+
+# ---------------------------------------------------------------------------
+# AI-BASED INTENT DETECTOR
+# ---------------------------------------------------------------------------
+def is_image_request(prompt: str, client) -> bool:
+    """
+    Instead of checking for trigger keywords (which misses many cases and
+    causes false positives), we ask the LLM itself to decide — exactly like
+    ChatGPT, Gemini, and Groq do.
+
+    The model returns a single word: IMAGE or TEXT.
+    We use a tiny, fast model call (no streaming needed).
+    """
+    classifier_prompt = f"""You are an intent classifier. 
+A user sent this message: "{prompt}"
+
+Does the user want you to GENERATE / CREATE / DRAW / SHOW an image or photo?
+Reply with exactly one word — either IMAGE or TEXT. Nothing else.
+
+Examples:
+"a dog playing in the snow" → IMAGE
+"what does a black hole look like" → IMAGE  
+"show me a sunset over the ocean" → IMAGE
+"portrait of a woman in Renaissance style" → IMAGE
+"neon city at night" → IMAGE
+"who invented the telephone" → TEXT
+"explain quantum physics" → TEXT
+"what is the capital of France" → TEXT
+"write me a poem about the moon" → TEXT
+"summarize this document" → TEXT
+"""
+    try:
+        resp = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": classifier_prompt}],
+            temperature=0,
+            max_tokens=5   # We only need one word: IMAGE or TEXT
+        )
+        answer = resp.choices[0].message.content.strip().upper()
+        return answer == "IMAGE"
+    except Exception:
+        # If classifier fails, fall back to a basic keyword check as safety net
+        fallback_triggers = ["draw", "generate image", "create image", "paint",
+                             "show me a picture", "make an image", "design"]
+        return any(t in prompt.lower() for t in fallback_triggers)
+
+
 # --- 5. CHAT LOGIC ---
-if prompt := st.chat_input("Draw me a neon city... or ask a question"):
+if prompt := st.chat_input("Ask me anything, or describe an image to create..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        # FIX 2: Replaced single broad words ("create", "image", "picture")
-        # with specific multi-word phrases so normal questions like
-        # "create a plan" or "what is an image classifier?" don't accidentally
-        # trigger image generation.
-        img_triggers = [
-            "draw me", "draw a", "draw an",
-            "generate an image", "generate a picture", "generate art",
-            "paint me", "paint a", "paint an",
-            "create an image", "create a picture", "create art",
-            "make an image", "make a picture", "make art",
-            "show me a picture", "show me an image",
-        ]
-
-        prompt_lower = prompt.lower()
-        is_image_request = any(trigger in prompt_lower for trigger in img_triggers)
-
-        if is_image_request:
+        # Use AI to decide intent — not keywords
+        if is_image_request(prompt, client):
             # --- PATH A: IMAGE GENERATION ---
             full_response = handle_image_generation(prompt, client)
         else:
